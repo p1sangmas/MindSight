@@ -15,7 +15,7 @@ from sklearn.metrics import accuracy_score
 import numpy as np
 
 
-def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epochs=30, batch_size=64, lr=1e-3, patience=5, early_stopping=False):
+def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epochs=30, batch_size=64, lr=1e-3, patience=5, early_stopping=True):
     # Create unique timestamp for this run
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     run_log_dir = os.path.join(log_dir, f'run_{timestamp}')

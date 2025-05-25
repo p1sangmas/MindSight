@@ -7,6 +7,9 @@ def get_dataloaders(data_dir='data', batch_size=64):
         transforms.Grayscale(num_output_channels=3),  # FER2013 is grayscale
         transforms.Resize((48, 48)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(15),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
