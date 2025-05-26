@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  fer-app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+      - model-data:/app/checkpoints
+    environment:
+      - PYTHONUNBUFFERED=1
+      - USE_WEBCAM_JS=true  # Flag to use JavaScript-based camera instead of OpenCV
+    # Add the privileged flag for device access
+    privileged: true
+    # For macOS, we're using a specific webcam solution
+    security_opt:
+      - seccomp:unconfined
+    # For Linux, add device mapping (no effect on macOS but helpful for Linux users)
+    devices:
+      - "/dev/video0:/dev/video0"
+    restart: unless-stopped
+
+volumes:
+  model-data:
+    driver: local

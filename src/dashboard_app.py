@@ -1,7 +1,15 @@
 import streamlit as st
 import os
 import sys
+import glob
+import cv2
+import torch
+import torch.nn.functional as F
+import torchvision.transforms as transforms
 from datetime import datetime
+import base64  # Add base64 for image encoding/decoding
+import numpy as np
+import streamlit.components.v1 as components  # For JavaScript components
 
 # Add parent directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -150,6 +158,28 @@ st.markdown("""
         background-color: #E3F2FD;
     }
     </style>
+    
+    <!-- Add JavaScript to request camera permission on page load -->
+    <script>
+    // Function to request camera permission
+    function requestCameraPermission() {
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(function(stream) {
+                console.log("Camera permission granted");
+                // Stop the stream since we just wanted permission
+                stream.getTracks().forEach(track => track.stop());
+            })
+            .catch(function(err) {
+                console.error("Error accessing camera: ", err);
+            });
+    }
+    
+    // Request permission when the page loads
+    window.addEventListener('load', function() {
+        // Small delay to ensure the page is fully loaded
+        setTimeout(requestCameraPermission, 1000);
+    });
+    </script>
 """, unsafe_allow_html=True)
 
 # --- Session State Management ---
@@ -171,6 +201,13 @@ if 'assessment_complete' not in st.session_state:
     st.session_state['assessment_complete'] = False
 if 'combined_assessment' not in st.session_state:
     st.session_state['combined_assessment'] = None
+if 'webcam_image' not in st.session_state:
+    st.session_state['webcam_image'] = None
+if 'webcam_active' not in st.session_state:
+    st.session_state['webcam_active'] = False
+
+# Check if we should use JavaScript webcam solution (in Docker)
+USE_JS_WEBCAM = os.environ.get('USE_WEBCAM_JS', 'false').lower() == 'true'
 
 # --- Header with Logo ---
 def render_header():
@@ -432,7 +469,28 @@ def emotion_recognition_page():
     </div>
     """, unsafe_allow_html=True)
     
-    model_path = "checkpoints/model_dataaugmented/best_model.pth"  # Default model path
+    # Add troubleshooting information in expandable section
+    with st.expander("Camera Troubleshooting (Click to expand)"):
+        st.markdown("""
+        ### Camera Not Working?
+        
+        1. **Check Browser Permissions**:
+           - Click the lock/info icon in your browser's address bar
+           - Ensure camera permissions are set to "Allow" for this site
+           - Try using Chrome or Firefox (they have better webcam support)
+        
+        2. **If Using Docker**:
+           - Browser-based camera access should work, but requires permission
+           - The camera request may be blocked by your browser's privacy settings
+           - Try clicking the "Start Session" button which will request camera permissions
+        
+        3. **Still Not Working?**:
+           - Try running the app directly without Docker: `streamlit run src/dashboard_app.py`
+           - Restart your browser
+           - Check if your camera works in other applications
+        """)
+    
+    model_path = os.environ.get("MODEL_PATH", "checkpoints/model_dataaugmented/best_model.pth")
     
     # Initialize webcam control variables
     if 'running' not in st.session_state:
@@ -446,11 +504,13 @@ def emotion_recognition_page():
             if start_button:
                 st.session_state['running'] = True
                 st.session_state['emotion_history'] = []  # Reset emotion history
+                st.session_state['webcam_active'] = True
                 st.rerun()
         else:
             stop_button = st.button("⏹️ Stop Session")
             if stop_button:
                 st.session_state['running'] = False
+                st.session_state['webcam_active'] = False
                 st.rerun()
     
     # Webcam placeholder
@@ -462,14 +522,328 @@ def emotion_recognition_page():
     # Results area
     results_area = st.empty()
     
-    # Run the emotion recognition when active
-    if st.session_state['running']:
+    # JavaScript-based webcam approach for Docker
+    if USE_JS_WEBCAM and st.session_state['running']:
+        # Load model
+        model, device = load_fer_model(model_path)
+        
+        # Create a container for the webcam feed and controls
+        webcam_container = st.container()
+        
+        with webcam_container:
+            # JavaScript to capture webcam frames and send to Python
+            js_code = """
+            <div style="display: flex; flex-direction: column; align-items: center;">
+                <video id="webcam" autoplay playsinline width="640" height="480" style="border-radius: 8px; border: 2px solid #1976D2; max-width: 100%; object-fit: cover;"></video>
+                <canvas id="canvas" style="display: none;"></canvas>
+                <div style="display: flex; justify-content: space-between; width: 100%; max-width: 640px; margin-top: 10px;">
+                    <div id="status" style="text-align: center; color: green; font-weight: bold; padding: 5px 10px; border-radius: 4px; background-color: #f0f0f0;">Camera Active</div>
+                    <div id="fps-counter" style="text-align: center; color: #666; padding: 5px 10px; border-radius: 4px; background-color: #f0f0f0;">0 FPS</div>
+                </div>
+                <div id="detection-status" style="margin-top: 5px; width: 100%; max-width: 640px; height: 5px; background-color: #eee; border-radius: 2px;">
+                    <div id="detection-bar" style="width: 0%; height: 100%; background-color: #4CAF50; border-radius: 2px; transition: width 0.3s;"></div>
+                </div>
+            </div>
+            <script>
+                const video = document.getElementById('webcam');
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d');
+                const status = document.getElementById('status');
+                const fpsCounter = document.getElementById('fps-counter');
+                const detectionBar = document.getElementById('detection-bar');
+                
+                // State variables
+                let captureInterval;
+                let lastProcessingTime = 0;
+                let processingTimeout = null;
+                let frameCount = 0;
+                let lastFpsUpdateTime = Date.now();
+                let detectionSuccess = false;
+                
+                // Request camera access with specific constraints - explicitly specify dimensions
+                navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { min: 640, ideal: 1280, max: 1920 },
+                        height: { min: 480, ideal: 720, max: 1080 },
+                        facingMode: "user"
+                    }, 
+                    audio: false 
+                })
+                    .then(stream => {
+                        video.srcObject = stream;
+                        status.textContent = "Camera Connected";
+                        
+                        // Get video track and its settings
+                        const videoTrack = stream.getVideoTracks()[0];
+                        const settings = videoTrack.getSettings();
+                        console.log("Camera settings:", settings);
+                        
+                        // Set up canvas with fixed size for consistency
+                        canvas.width = 640;
+                        canvas.height = 480;
+                        
+                        // Start capturing frames
+                        // Set a watchdog timer to detect if the processing loop has stopped responding
+                let watchdogTimer = setInterval(() => {
+                    const timeSinceLastProcessing = Date.now() - lastProcessingTime;
+                    if (timeSinceLastProcessing > 5000) { // 5 seconds without updates
+                        status.textContent = "Processing Stalled";
+                        status.style.color = "red";
+                        detectionBar.style.width = "10%";
+                        detectionBar.style.backgroundColor = "#F44336"; // Red
+                    }
+                }, 5000);
+                
+                captureInterval = setInterval(() => {
+                            try {
+                                // Update FPS counter every second
+                                frameCount++;
+                                const now = Date.now();
+                                if (now - lastFpsUpdateTime >= 1000) {
+                                    const fps = Math.round((frameCount * 1000) / (now - lastFpsUpdateTime));
+                                    fpsCounter.textContent = `${fps} FPS`;
+                                    frameCount = 0;
+                                    lastFpsUpdateTime = now;
+                                    
+                                    // Animate the detection bar based on status
+                                    if (detectionSuccess) {
+                                        detectionBar.style.width = '100%';
+                                        detectionBar.style.backgroundColor = '#4CAF50'; // Green
+                                    } else {
+                                        detectionBar.style.width = '30%';
+                                        detectionBar.style.backgroundColor = '#FFC107'; // Yellow/amber
+                                    }
+                                }
+                                
+                                // Get current video dimensions
+                                const videoWidth = video.videoWidth;
+                                const videoHeight = video.videoHeight;
+                                
+                                if (videoWidth && videoHeight) {
+                                                // Draw the video frame centered on the canvas
+                                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                                    
+                                    // Add a timestamp to prevent caching issues
+                                    const timestamp = Date.now();
+                                    
+                                    // Throttle image capture to reduce CPU load (don't send too many frames)
+                                    // This helps avoid overwhelming the Python backend
+                                    const frameRateMs = 300; // Send approx 3 frames per second
+                                    
+                                    const imgData = canvas.toDataURL('image/jpeg', 0.9);
+                            
+                                    // Send frame data to Streamlit
+                                    window.parent.postMessage({
+                                        type: 'streamlit:setComponentValue',
+                                        value: imgData
+                                    }, '*');
+                                    
+                                    // Track the processing state with a timestamp
+                                    lastProcessingTime = Date.now();
+                                    
+                                    // Set status to analyzing
+                                    status.textContent = "Analyzing...";
+                                    status.style.color = "#FF9800"; // Orange color while analyzing
+                                    
+                                    // Clear any existing timeout
+                                    if (processingTimeout) {
+                                        clearTimeout(processingTimeout);
+                                    }
+                                    
+                                    // IMPORTANT: Always reset the status back to active after a short delay
+                                    // This is a fail-safe to ensure the status doesn't get stuck
+                                    processingTimeout = setTimeout(() => {
+                                        status.textContent = "Camera Active";
+                                        status.style.color = "green";
+                                        console.log("Status auto-reset to Camera Active");
+                                    }, 800); // Shorter timeout (800ms) to ensure it always resets
+                                } else {
+                                    status.textContent = "Waiting for video...";
+                                    status.style.color = "#2196F3"; // Blue color while waiting
+                                }
+                            } catch (e) {
+                                console.error("Error capturing frame:", e);
+                                status.textContent = "Error capturing frame";
+                                status.style.color = "red";
+                            }
+                        }, 300); // Capture more frequently for responsiveness
+                    })
+                    .catch(err => {
+                        status.textContent = "Camera Error: " + err.message;
+                        status.style.color = "red";
+                        console.error("Error accessing camera:", err);
+                    });
+                
+                // Listen for status update messages from the parent
+                window.addEventListener('message', function(event) {
+                    if (event.data && event.data.type === 'camera_status_update') {
+                        // Update the status with the message from Python
+                        status.textContent = event.data.status;
+                        status.style.color = event.data.color || "green";
+                        console.log("Status updated from Python:", event.data.status);
+                        
+                        // Update detection success status
+                        if (event.data.detectionSuccess !== undefined) {
+                            detectionSuccess = event.data.detectionSuccess;
+                            
+                            // Update detection bar immediately
+                            if (detectionSuccess) {
+                                detectionBar.style.width = '100%';
+                                detectionBar.style.backgroundColor = '#4CAF50'; // Green
+                            } else {
+                                detectionBar.style.width = '30%';
+                                detectionBar.style.backgroundColor = '#FFC107'; // Yellow/amber
+                            }
+                        }
+                    }
+                });
+                    
+                // Clean up when component is unmounted
+                window.addEventListener('beforeunload', () => {
+                    if (captureInterval) {
+                        clearInterval(captureInterval);
+                    }
+                    if (watchdogTimer) {
+                        clearInterval(watchdogTimer);
+                    }
+                    if (processingTimeout) {
+                        clearTimeout(processingTimeout);
+                    }
+                    if (video.srcObject) {
+                        video.srcObject.getTracks().forEach(track => track.stop());
+                    }
+                });
+            </script>
+            """
+            
+            # Render the JavaScript component
+            components.html(js_code, height=550)
+            
+            # Debug info - Helpful in Docker
+            with st.expander("Debug Information"):
+                st.write("If faces are not being detected, try adjusting your position or lighting.")
+                st.write("Camera data is being processed through the browser.")
+                if st.button("Force Refresh Camera"):
+                    st.experimental_rerun()
+            
+            # Get the webcam image from the session state
+            if 'webcam_image' in st.session_state:
+                img_data = st.session_state.get('webcam_image')
+                
+                if img_data and img_data.startswith('data:image/jpeg;base64,'):
+                    # Process the image for emotion recognition
+                    try:
+                        # Extract the base64 data
+                        b64_data = img_data.split(',')[1]
+                        img_bytes = base64.b64decode(b64_data)
+                        
+                        # Convert to numpy array
+                        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+                        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                        
+                        # Process for emotion detection with more aggressive detection settings
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        
+                        # Create a face cascade classifier
+                        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                        
+                        # Try with different parameters to increase detection chances
+                        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30))
+                        
+                        # If no faces detected, use center region as a fallback
+                        if len(faces) == 0:
+                            h, w = frame.shape[:2]
+                            center_x = w // 4
+                            center_y = h // 4
+                            center_w = w // 2
+                            center_h = h // 2
+                            faces = np.array([[center_x, center_y, center_w, center_h]])
+                            # Add a note that we're using fallback detection
+                            cv2.putText(frame, "Using fallback face region", (10, 30),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        
+                        for (x, y, w, h) in faces:
+                            face = frame[y:y+h, x:x+w]
+                            input_tensor = preprocess_face(face).to(device)
+                            
+                            with torch.no_grad():
+                                output = model(input_tensor)
+                                probs = F.softmax(output, dim=1).cpu().numpy()[0]
+                                emotion_idx = np.argmax(probs)
+                                emotion_label = EMOTIONS[emotion_idx]
+                                st.session_state['emotion_history'].append(emotion_label)
+                            
+                            # Draw rectangle around face
+                            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 120, 255), 2)
+                            
+                            # Draw emotion label
+                            label = f"{emotion_label}: {probs[emotion_idx]:.2f}"
+                            label_size, base_line = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                            y_label = max(y - 10, label_size[1])
+                            cv2.putText(frame, label, (x, y_label), 
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 120, 255), 2)
+                        
+                        # Display the processed frame
+                        stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True, output_format="JPEG", quality=95)
+                        
+                        # Send a status update to JavaScript with detection success info
+                        detection_success = len(faces) > 0  # True if faces were detected
+                        js_status_update = f"""
+                        <script>
+                            window.parent.postMessage({{
+                                type: 'camera_status_update',
+                                status: 'Camera Active',
+                                color: 'green',
+                                detectionSuccess: {str(detection_success).lower()}
+                            }}, '*');
+                        </script>
+                        """
+                        components.html(js_status_update, height=0, width=0)
+                        
+                        # Update progress
+                        if len(st.session_state['emotion_history']) > 0:
+                            progress_percent = min(int((len(st.session_state['emotion_history']) / 120) * 100), 100)
+                            with progress_placeholder.container():
+                                progress_bar = st.progress(progress_percent)
+                                st.text(f"Recording... {progress_percent}% complete")
+                                
+                        # Stop after collecting enough samples
+                        if len(st.session_state['emotion_history']) >= 120:
+                            st.session_state['running'] = False
+                            st.session_state['webcam_active'] = False
+                            st.success("Session completed successfully!")
+                            st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error processing webcam image: {str(e)}")
+                        # Send error status update to JavaScript
+                        error_msg = str(e).replace("'", "\\'")
+                        js_error_update = f"""
+                        <script>
+                            window.parent.postMessage({{
+                                type: 'camera_status_update',
+                                status: 'Error: {error_msg}',
+                                color: 'red'
+                            }}, '*');
+                        </script>
+                        """
+                        components.html(js_error_update, height=0, width=0)
+        
+    # Standard OpenCV-based webcam approach (for non-Docker environments)
+    elif st.session_state['running'] and not USE_JS_WEBCAM:
         try:
             model, device = load_fer_model(model_path)
             cap = cv2.VideoCapture(0)
             
             if not cap.isOpened():
-                st.error("Error: Could not access webcam. Please check your camera connection and permissions.")
+                st.error("""
+                Error: Could not access webcam. 
+                
+                When running in Docker:
+                1. Make sure you've granted camera permissions to your browser
+                2. Check that Docker Desktop has camera permissions in your system settings
+                3. See webcam-setup.md for detailed instructions
+                """)
                 st.session_state['running'] = False
             else:
                 emotion_history = []
@@ -1190,3 +1564,34 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# --- Handle webcam callback data ---
+if 'webcam_image' not in st.session_state:
+    st.session_state['webcam_image'] = None
+
+def on_webcam_data(key, value):
+    """Callback function for receiving webcam data from JavaScript"""
+    st.session_state['webcam_image'] = value
+
+# Register callback function to receive webcam images
+if USE_JS_WEBCAM:
+    components.html("""
+        <script>
+        // Listen for messages from iframe to parent
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'streamlit:componentOutput') {
+                // This logs the data being sent by the component to the parent
+                const componentData = event.data.data;
+                // If this is image data, pass it along to Streamlit via session_state
+                if (componentData && typeof componentData === 'string' && 
+                    componentData.startsWith('data:image')) {
+                    window.parent.postMessage({
+                        type: 'streamlit:setComponentValue',
+                        value: componentData
+                    }, '*');
+                }
+            }
+        });
+        </script>
+    """, height=0)
+    st.session_state._on_webcam_data = on_webcam_data
