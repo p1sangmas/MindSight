@@ -10,3 +10,6 @@ pillow
 tensorboard
 tqdm
 seaborn
+streamlit
+matplotlib
+plotly
