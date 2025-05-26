@@ -12,19 +12,9 @@ import numpy as np
 # Define emotion labels
 EMOTIONS = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
 
-def get_latest_checkpoint(checkpoints_dir='checkpoints'):
-    folders = glob.glob(os.path.join(checkpoints_dir, 'model_*'))
-    if not folders:
-        raise FileNotFoundError("No checkpoint folders found.")
-    latest_folder = max(folders, key=os.path.getmtime)
-    model_path = os.path.join(latest_folder, 'best_model.pth')
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"No model file found in {latest_folder}")
-    print(f"Loading model from checkpoint folder: {latest_folder}")
-    return model_path
-
-def load_model():
-    model_path = get_latest_checkpoint()
+def load_model(model_path=None):
+    if model_path is None:
+        raise ValueError("You must specify the path to the model checkpoint (best_model.pth).")
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     model = EmotionRecognitionModel(num_classes=7).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
@@ -42,7 +32,11 @@ def preprocess_face(face):
     return transform(face).unsqueeze(0)
 
 def main():
-    model, device = load_model()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_path', type=str, required=True, help='Path to best_model.pth')
+    args = parser.parse_args()
+    model, device = load_model(args.model_path)
 
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     cap = cv2.VideoCapture(0)
