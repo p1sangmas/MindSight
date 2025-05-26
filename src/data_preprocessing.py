@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from collections import Counter
 from torch.utils.data import WeightedRandomSampler
 
-def get_dataloaders(data_dir='data', batch_size=64):
+def get_dataloaders(data_dir='data', batch_size=64, oversample=False):
     transform_train = transforms.Compose([
         transforms.Grayscale(num_output_channels=3),  # FER2013 is grayscale
         transforms.Resize((48, 48)),
@@ -30,16 +30,19 @@ def get_dataloaders(data_dir='data', batch_size=64):
     train_dataset = datasets.ImageFolder(train_path, transform=transform_train)
     val_dataset = datasets.ImageFolder(val_path, transform=transform_val)
 
-    # Compute class counts for oversampling
-    targets = [sample[1] for sample in train_dataset.samples]
-    class_counts = Counter(targets)
-    num_classes = len(class_counts)
-    class_sample_count = [class_counts.get(i, 0) for i in range(num_classes)]
-    weights = 1. / torch.tensor(class_sample_count, dtype=torch.float)
-    sample_weights = [weights[label] for label in targets]
-    sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
+    if oversample:
+        # Compute class counts for oversampling
+        targets = [sample[1] for sample in train_dataset.samples]
+        class_counts = Counter(targets)
+        num_classes = len(class_counts)
+        class_sample_count = [class_counts.get(i, 0) for i in range(num_classes)]
+        weights = 1. / torch.tensor(class_sample_count, dtype=torch.float)
+        sample_weights = [weights[label] for label in targets]
+        sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, num_workers=2)
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     return train_loader, val_loader

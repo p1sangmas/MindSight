@@ -16,7 +16,7 @@ import numpy as np
 from collections import Counter
 
 
-def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epochs=30, batch_size=64, lr=1e-3, patience=5, early_stopping=True, model_folder=None):
+def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epochs=30, batch_size=64, lr=1e-3, patience=5, early_stopping=True, model_folder=None, oversample=False):
     # Use specified folder name if provided, else use timestamp
     if model_folder is not None:
         run_save_dir = os.path.join(save_dir, model_folder)
@@ -28,7 +28,7 @@ def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epo
     os.makedirs(run_save_dir, exist_ok=True)
     writer = SummaryWriter(run_log_dir)
 
-    train_loader, val_loader = get_dataloaders(data_dir, batch_size)
+    train_loader, val_loader = get_dataloaders(data_dir, batch_size, oversample=oversample)
 
     # Count class distribution in training set
     train_labels_list = []
@@ -132,5 +132,6 @@ if __name__ == '__main__':
     parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--early_stopping', action='store_true')
     parser.add_argument('--model_folder', type=str, default=None, help='Specify folder name for this run (inside checkpoints/)')
+    parser.add_argument('--oversample', action='store_true', help='Enable class balancing with oversampling')
     args = parser.parse_args()
-    train_model(data_dir=args.data_dir, save_dir=args.save_dir, log_dir=args.log_dir, num_epochs=args.num_epochs, batch_size=args.batch_size, lr=args.lr, patience=args.patience, early_stopping=args.early_stopping, model_folder=args.model_folder)
+    train_model(data_dir=args.data_dir, save_dir=args.save_dir, log_dir=args.log_dir, num_epochs=args.num_epochs, batch_size=args.batch_size, lr=args.lr, patience=args.patience, early_stopping=args.early_stopping, model_folder=args.model_folder, oversample=args.oversample)
