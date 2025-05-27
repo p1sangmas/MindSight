@@ -8,6 +8,10 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
+# Print camera information for the user
+echo "Note: This application uses OpenCV to access your webcam."
+echo "For Docker webcam access to work, your camera device must be mapped properly to the container."
+
 # Stop any existing containers
 echo "Stopping any existing containers..."
 docker-compose down
@@ -18,14 +22,5 @@ docker-compose up --build -d
 
 echo ""
 echo "The application is now running at: http://localhost:8501"
-echo ""
-echo "=== WEBCAM ACCESS INFORMATION ==="
-echo "This version includes a special JavaScript-based webcam solution for Docker."
-echo "Make sure to:"
-echo "1. Grant camera permissions to your browser when prompted"
-echo "2. Use Chrome or Firefox for best compatibility"
-echo "3. If camera access fails, try running the app directly with:"
-echo "   streamlit run src/dashboard_app.py"
-echo ""
 echo "To view logs: docker-compose logs -f"
 echo "To stop: docker-compose down"

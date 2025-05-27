@@ -1,13 +1,14 @@
-# Webcam Setup for Docker
+# Webcam Setup Guide for FER Application
+
+## Overview
+This application now uses OpenCV directly to access your webcam. The JavaScript-based webcam solution has been removed as it was causing issues.
 
 ## Prerequisites
-- Docker Desktop for macOS with latest updates
+- Docker Desktop with latest updates (if running in Docker)
+- A functioning webcam connected to your computer
+- Proper permissions to access camera devices
 
-## Setting up Webcam Access for Docker on macOS
-
-### Method 1: Using the Privileged Mode (Already Configured)
-
-The `docker-compose.yml` file has been updated to include the following settings:
+## Setting up Webcam Access for Docker
 
 ```yaml
 privileged: true

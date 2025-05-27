@@ -10,13 +10,18 @@ services:
       - model-data:/app/checkpoints
     environment:
       - PYTHONUNBUFFERED=1
-      - USE_WEBCAM_JS=true  # Flag to use JavaScript-based camera instead of OpenCV
-    # Add the privileged flag for device access
+    # Add the privileged flag for device access (Helps with webcam on some systems)
     privileged: true
-    # For macOS, we're using a specific webcam solution
+    # Uncomment the appropriate device mapping for your OS:
+    
+    # For Linux: Map the video device directly
+    # devices:
+    #   - "/dev/video0:/dev/video0"
+    
+    # For macOS: Use device passthrough (requires additional setup)
+    # See webcam-setup.md for macOS-specific instructions
     security_opt:
       - seccomp:unconfined
-    # For Linux, add device mapping (no effect on macOS but helpful for Linux users)
     devices:
       - "/dev/video0:/dev/video0"
     restart: unless-stopped
