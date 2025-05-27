@@ -9,7 +9,7 @@ MindSight is an advanced AI-powered application that combines facial emotion rec
 ## Key Features
 
 - **Real-time Emotion Detection**: Process webcam feed to identify facial expressions and emotional states
-- **Mental Health Assessment**: Integrates emotional analysis with standardized psychological questionnaires
+- **Mental Health Assessment**: Integrates emotional analysis with standardized psychological questionnaires including PHQ-9 (depression) and GAD-7 (anxiety)
 - **Clinical Dashboard**: Professional UI designed for healthcare practitioners
 - **Comprehensive Reporting**: Generates detailed assessment reports with visualizations
 - **Containerized Deployment**: Easily deploy with Docker in various environments
@@ -42,8 +42,8 @@ MindSight is an advanced AI-powered application that combines facial emotion rec
 ### Option 1: Using Docker
 ```bash
 # Clone the repository
-git clone https://github.com/username/mindsight-fer.git
-cd mindsight-fer
+git clone https://github.com/p1sangmas/MindSight.git
+cd MindSight
 
 # Start the application with Docker
 ./start.sh
@@ -54,8 +54,8 @@ cd mindsight-fer
 ### Option 2: Local Installation (Recommended for webcam functionality)
 ```bash
 # Clone the repository
-git clone https://github.com/username/mindsight-fer.git
-cd mindsight-fer
+git clone https://github.com/p1sangmas/MindSight.git
+cd MindSight
 
 # Create and activate virtual environment
 python -m venv env
