@@ -59,7 +59,7 @@ If the webcam doesn't work inside Docker on macOS:
 
 3. **Run Outside Docker**: As a last resort, you can run the Streamlit app directly on your host machine:
    ```bash
-   cd /Users/fakhrulfauzi/Documents/Projects/FER\ 2
+   cd /your-project-directory\ 2
    streamlit run src/dashboard_app.py
    ```
 

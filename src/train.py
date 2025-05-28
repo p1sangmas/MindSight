@@ -10,13 +10,14 @@ from tqdm import tqdm
 import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.model import EmotionRecognitionModel
+from src.model_2 import ImprovedEmotionRecognitionModel, FocalLoss
 from src.data_preprocessing import get_dataloaders
 from sklearn.metrics import accuracy_score
 import numpy as np
 from collections import Counter
 
 
-def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epochs=30, batch_size=64, lr=1e-3, patience=5, early_stopping=True, model_folder=None, oversample=False):
+def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epochs=30, batch_size=64, lr=1e-3, patience=5, early_stopping=True, model_folder=None, oversample=False, model_version='original', use_focal_loss=False, class_weights=None, resume_from=None):
     # Use specified folder name if provided, else use timestamp
     if model_folder is not None:
         run_save_dir = os.path.join(save_dir, model_folder)
@@ -44,9 +45,38 @@ def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epo
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using device: {device}")
     print(f"Training on {len(train_loader.dataset)} training samples and {len(val_loader.dataset)} validation samples.")
-    model = EmotionRecognitionModel(num_classes=7).to(device)
-
-    criterion = nn.CrossEntropyLoss()
+    
+    # Select model based on model_version parameter
+    if model_version == 'improved':
+        print("Using improved emotion recognition model")
+        model = ImprovedEmotionRecognitionModel(num_classes=7).to(device)
+    else:  # default to original
+        print("Using original emotion recognition model")
+        model = EmotionRecognitionModel(num_classes=7).to(device)
+    
+    # Load weights if resuming from a checkpoint
+    if resume_from:
+        print(f"Loading checkpoint from: {resume_from}")
+        checkpoint = torch.load(resume_from, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        best_val_loss = checkpoint['best_val_loss']
+        start_epoch = checkpoint['epoch'] + 1
+        epochs_no_improve = checkpoint['epochs_no_improve']
+        print(f"Resuming from epoch {start_epoch} with best val loss {best_val_loss:.4f}")
+    
+    # Select loss function based on parameters
+    if use_focal_loss:
+        print("Using Focal Loss")
+        criterion = FocalLoss(gamma=2)
+    elif class_weights is not None:
+        print(f"Using weighted CrossEntropyLoss with weights: {class_weights}")
+        weights = torch.tensor(class_weights, device=device)
+        criterion = nn.CrossEntropyLoss(weight=weights)
+    else:
+        criterion = nn.CrossEntropyLoss()
+        
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
 
@@ -108,7 +138,15 @@ def train_model(data_dir='data', save_dir='checkpoints', log_dir='runs', num_epo
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(run_save_dir, 'best_model.pth'))
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_val_loss': best_val_loss,
+                'epochs_no_improve': epochs_no_improve
+            }
+            torch.save(checkpoint, os.path.join(run_save_dir, 'best_model.pth'))
             epochs_no_improve = 0
         else:
             epochs_no_improve += 1
@@ -133,5 +171,24 @@ if __name__ == '__main__':
     parser.add_argument('--early_stopping', action='store_true')
     parser.add_argument('--model_folder', type=str, default=None, help='Specify folder name for this run (inside checkpoints/)')
     parser.add_argument('--oversample', action='store_true', help='Enable class balancing with oversampling')
+    parser.add_argument('--model_version', type=str, default='original', choices=['original', 'improved'], help='Select model architecture')
+    parser.add_argument('--focal_loss', action='store_true', help='Use Focal Loss instead of CrossEntropyLoss')
+    parser.add_argument('--class_weights', type=float, nargs='+', default=None, help='Class weights for loss function [angry, disgust, fear, happy, neutral, sad, surprise]')
+    parser.add_argument('--resume_from', type=str, default=None, help='Path to model checkpoint to resume training from')
     args = parser.parse_args()
-    train_model(data_dir=args.data_dir, save_dir=args.save_dir, log_dir=args.log_dir, num_epochs=args.num_epochs, batch_size=args.batch_size, lr=args.lr, patience=args.patience, early_stopping=args.early_stopping, model_folder=args.model_folder, oversample=args.oversample)
+    train_model(
+        data_dir=args.data_dir,
+        save_dir=args.save_dir,
+        log_dir=args.log_dir,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        patience=args.patience,
+        early_stopping=args.early_stopping,
+        model_folder=args.model_folder,
+        oversample=args.oversample,
+        model_version=args.model_version,
+        use_focal_loss=args.focal_loss,
+        class_weights=args.class_weights,
+        resume_from=args.resume_from
+    )

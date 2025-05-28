@@ -15,6 +15,7 @@ import streamlit.components.v1 as components  # For JavaScript components
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.dashboard_utils import *
 from src.model import EmotionRecognitionModel
+from src.model_2 import ImprovedEmotionRecognitionModel
 from src.questionnaire import load_questionnaire
 
 
@@ -203,6 +204,9 @@ if 'combined_assessment' not in st.session_state:
     st.session_state['combined_assessment'] = None
 if 'webcam_active' not in st.session_state:
     st.session_state['webcam_active'] = False
+# Hardcoded model settings
+st.session_state['model_version'] = 'improved'
+st.session_state['current_checkpoint'] = 'model_2_weights_50'
 
 # Always use OpenCV for webcam (removed JavaScript webcam implementation)
 USE_JS_WEBCAM = False
@@ -221,8 +225,14 @@ def render_header():
 
 # --- Model Loading ---
 @st.cache_resource
-def load_fer_model(model_path):
-    """Load the Facial Emotion Recognition model"""
+def load_fer_model(model_path, model_version='original'):
+    """
+    Load the Facial Emotion Recognition model
+    
+    Args:
+        model_path: Path to model checkpoint file
+        model_version: 'original' or 'improved' model architecture
+    """
     # Check for available hardware acceleration
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -235,11 +245,27 @@ def load_fer_model(model_path):
         device = torch.device("cpu")
         st.sidebar.info("ⓘ Using CPU for inference (slower)")
     
-    # Load model onto selected device
-    model = EmotionRecognitionModel(num_classes=7).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
+    # Select model architecture based on version parameter
+    if model_version == 'improved':
+        model = ImprovedEmotionRecognitionModel(num_classes=7).to(device)
+        st.sidebar.info("ⓘ Using improved FER model (with Spatial Attention)")
+    else:
+        model = EmotionRecognitionModel(num_classes=7).to(device)
+        st.sidebar.info("ⓘ Using original FER model")
     
+    # Load checkpoint - handle both simple state_dict or full checkpoint format
+    checkpoint = torch.load(model_path, map_location=device)
+    
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        # This is a full checkpoint with training state
+        model.load_state_dict(checkpoint['model_state_dict'])
+        # Add checkpoint info to sidebar
+        st.sidebar.info(f"ⓘ Loaded from checkpoint (epoch {checkpoint['epoch']})")
+    else:
+        # Legacy format - direct state_dict
+        model.load_state_dict(checkpoint)
+    
+    model.eval()
     return model, device
 
 # --- Sidebar Navigation ---
@@ -290,7 +316,9 @@ def render_sidebar():
         # System information
         st.markdown("---")
         st.markdown("<h3>System Information</h3>", unsafe_allow_html=True)
-        st.markdown(f"<p>Model: EfficientNet-B0 + Transformer</p>", unsafe_allow_html=True)
+        
+        # Fixed model architecture information
+        st.markdown(f"<p>🧠 Model: <span style='color:#2196F3; font-weight:bold;'>EfficientNet-B0 + Spatial Attention + Enhanced Transformer</span></p>", unsafe_allow_html=True)
         
         # Show device information with appropriate icon
         if torch.cuda.is_available():
@@ -300,6 +328,7 @@ def render_sidebar():
             st.markdown(f"<p>💻 Processing Device: <span style='color:#2196F3; font-weight:bold;'>Apple MPS</span></p>", unsafe_allow_html=True)
         else:
             st.markdown(f"<p>💻 Processing Device: <span style='color:#9E9E9E;'>CPU</span> (GPU acceleration unavailable)</p>", unsafe_allow_html=True)
+            
 
 # --- Pages ---
 def welcome_page():
@@ -467,6 +496,10 @@ def emotion_recognition_page():
     </div>
     """, unsafe_allow_html=True)
     
+    # Add model information card with hardcoded values
+    model_name = "Improved Model (with Spatial Attention)"
+    checkpoint_name = "Model 2 Weights 50"
+    
     # Add troubleshooting information in expandable section
     with st.expander("Camera Troubleshooting (Click to expand)"):
         st.markdown("""
@@ -489,7 +522,14 @@ def emotion_recognition_page():
            - Check if you need to update your webcam drivers
         """)
     
-    model_path = os.environ.get("MODEL_PATH", "checkpoints/model_dataaugmented/best_model.pth")
+    # Hardcoded model configuration
+    model_version = 'improved'  # Using the improved model architecture
+    model_checkpoint = 'model_2_weights_50'  # Using the weights_50 checkpoint
+    model_path = os.path.join("checkpoints", model_checkpoint, "best_model.pth")
+    
+    # Set the session state values
+    st.session_state['model_version'] = model_version
+    st.session_state['current_checkpoint'] = model_checkpoint
     
     # Initialize webcam control variables
     if 'running' not in st.session_state:
@@ -524,7 +564,8 @@ def emotion_recognition_page():
     # Using OpenCV for webcam capture
     if st.session_state['running']:
         try:
-            model, device = load_fer_model(model_path)
+            # Use the hardcoded model version
+            model, device = load_fer_model(model_path, model_version='improved')
             cap = cv2.VideoCapture(0)
             
             if not cap.isOpened():

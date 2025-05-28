@@ -16,18 +16,23 @@ MindSight is an advanced AI-powered application that combines facial emotion rec
 
 ## Screenshots
 
-![Dashboard Interface](assets/dashboard.png)
-*The clinical dashboard provides an intuitive interface for practitioners*
-
-![Assessment Interface](assets/assessment_page.png)
-*The assessment interface combines real-time emotion recognition with psychological questionnaires*
+| Screenshot | Description |
+|------------|-------------|
+| ![Dashboard Interface](assets/dashboard.png) | *The clinical dashboard provides an intuitive interface for practitioners* |
+| ![Assessment Interface](assets/assessment_page.png) | *The assessment interface combines real-time emotion recognition with psychological questionnaires* |
 
 ## Technical Details
 
 ### Architecture
-- **Model**: EfficientNet-B0 backbone with custom Transformer blocks
-- **Training**: Cross-validation, data augmentation, and oversampling techniques
-- **Performance**: As for now, we achieved ~67% accuracy on the 7-class emotion classification task. We are still experimenting with the training pipeline to achieve the best result.
+- **Base Model** (`model.py`): EfficientNet-B0 backbone with custom Transformer blocks
+- **Improved Model** (`model_2.py`): Enhanced architecture with:
+  - Multi-scale feature extraction using feature pyramid (3-layer extraction)
+  - Spatial attention mechanism to focus on relevant facial features
+  - Enhanced transformer with 8 attention heads and 3 transformer blocks (increased from 4 heads and 2 blocks)
+  - Deeper MLP head with GELU activation and dropout regularization (0.2 dropout rate)
+  - Focal Loss implementation (α=1, γ=2) for handling class imbalance
+- **Training**: Cross-validation, data augmentation, class oversampling and focal loss techniques
+- **Performance**: As for now, we achieved ~67% accuracy on the 7-class emotion classification task. We are still experimenting with the training pipeline to achieve the best result
 - **Inference**: Real-time processing with support for CPU and GPU/MPS hardware acceleration
 
 ### Tech Stack
@@ -78,27 +83,40 @@ For optimal webcam performance, please note:
 
 ## Training Custom Models
 
-The project includes scripts for training custom emotion recognition models:
+The project includes scripts for training custom emotion recognition models. You can train either the base model or the improved model with various configurations:
 
 ```bash
-# Train with default parameters
-python src/train.py --data_dir data
+# Train the base model with default parameters
+python src/train.py --data_dir data --model_version original
 
-# Train with custom configurations
-python src/train.py --data_dir data --model_folder my_custom_model --num_epochs 50 --batch_size 32
+# Train the improved model with focal loss
+python src/train.py --data_dir data --model_version improved --focal_loss --model_folder my_custom_model
+
+# Train the improved model with class weights
+python src/train.py --data_dir data --model_version improved --class_weights 1.5 2.0 1.5 0.8 1.2 1.5 1.0 --model_folder my_custom_model
+
+# Train with custom configurations (e.g., for 50 epochs)
+python src/train.py --data_dir data --model_version improved --focal_loss --model_folder my_custom_model --num_epochs 50 --batch_size 32
 ```
 
-## Evaluation
+## Evaluation and Results
 
 ```bash
 # Evaluate a trained model
 python src/evaluate.py --model_path checkpoints/model_name/best_model.pth
 ```
 
+Each checkpoint directory will contains:
+- `best_model.pth`: The trained model weights
+- `classification_report.txt`: Detailed metrics including precision, recall, and F1-score
+- `confusion_matrix.png`: Visualization of model performance across emotion classes
+- `train_log.txt`: Complete training history
+
 ## Project Structure
 ```
 ├── src/                  # Source code
-│   ├── model.py          # Model architecture definition
+│   ├── model.py          # Base model architecture definition
+│   ├── model_2.py        # Improved model with advanced features
 │   ├── train.py          # Training pipeline
 │   ├── evaluate.py       # Evaluation script
 │   ├── dashboard_app.py  # Streamlit dashboard application
@@ -106,9 +124,12 @@ python src/evaluate.py --model_path checkpoints/model_name/best_model.pth
 │   ├── questionnaire.py  # Psychological assessment questionnaires
 │   └── data_preprocessing.py # Data preprocessing utilities
 ├── data/                 # Training and testing datasets
-├── checkpoints/          # Saved model weights
-├── runs/                 # TensorBoard logs
-├── imgs/                 # Images and screenshots
+│   ├── train/            # Training images organized by emotion classes
+│   └── test/             # Test images organized by emotion classes
+├── checkpoints/          # Saved model weights for various experiments
+│   ├── model_name/       # Trained model
+├── runs/                 # TensorBoard logs for training monitoring
+├── assets/               # Sample images and screenshots
 └── docker-compose.yml    # Docker configuration
 ```
 
