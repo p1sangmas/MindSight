@@ -552,8 +552,30 @@ def emotion_recognition_page():
                 st.session_state['webcam_active'] = False
                 st.rerun()
     
-    # Webcam placeholder
-    stframe = st.empty()
+    # Create two columns: one for video, one for real-time emotion display
+    video_col, emotion_col = st.columns([2, 1])
+    
+    with video_col:
+        st.markdown("### 📹 Live Camera Feed")
+        stframe = st.empty()
+    
+    with emotion_col:
+        st.markdown("### 🎭 Real-time Emotion Detection")
+        emotion_display = st.empty()
+        
+        # Show initial state when not running
+        if not st.session_state['running']:
+            initial_html = """
+            <div style='text-align: center; padding: 20px; background-color: #f8f9fa; 
+                        border-radius: 10px; margin: 10px 0; border: 2px dashed #ccc;'>
+                <div style='font-size: 2em; margin-bottom: 10px; color: #999;'>🎭</div>
+                <div style='font-size: 1.2em; color: #666;'>Waiting for session to start...</div>
+                <div style='font-size: 0.9em; color: #888; margin-top: 5px;'>
+                    Emotions will appear here in real-time
+                </div>
+            </div>
+            """
+            emotion_display.markdown(initial_html, unsafe_allow_html=True)
     
     # Progress placeholder
     progress_placeholder = st.empty()
@@ -611,19 +633,17 @@ def emotion_recognition_page():
                         # Try with different parameters to increase detection chances
                         faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30))
                         
-                        # If no faces detected, use center region as a fallback
-                        if len(faces) == 0:
-                            h, w = frame.shape[:2]
-                            center_x = w // 4
-                            center_y = h // 4
-                            center_w = w // 2
-                            center_h = h // 2
-                            faces = np.array([[center_x, center_y, center_w, center_h]])
-                            # Add a note that we're using fallback detection
-                            cv2.putText(frame, "Using fallback face region", (10, 30),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        # Initialize variables for emotion display
+                        current_emotion = "neutral"
+                        current_confidence = 0.0
+                        current_probs = None
                         
-                        for (x, y, w, h) in faces:
+                        # Only process the largest face (most prominent one)
+                        if len(faces) > 0:
+                            # Find the largest face by area (width * height)
+                            largest_face = max(faces, key=lambda face: face[2] * face[3])
+                            x, y, w, h = largest_face
+                            
                             face = frame[y:y+h, x:x+w]
                             input_tensor = preprocess_face(face).to(device)
                             
@@ -633,6 +653,11 @@ def emotion_recognition_page():
                                 emotion_idx = np.argmax(probs)
                                 emotion_label = EMOTIONS[emotion_idx]
                                 emotion_history.append(emotion_label)
+                                
+                                # Update current emotion for real-time display
+                                current_emotion = emotion_label
+                                current_confidence = probs[emotion_idx] * 100
+                                current_probs = probs
                             
                             # Draw rectangle around face
                             cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 120, 255), 2)
@@ -643,9 +668,61 @@ def emotion_recognition_page():
                             y_label = max(y - 10, label_size[1])
                             cv2.putText(frame, label, (x, y_label), 
                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 120, 255), 2)
+                        else:
+                            # If no faces detected, use center region as a fallback
+                            h, w = frame.shape[:2]
+                            center_x = w // 4
+                            center_y = h // 4
+                            center_w = w // 2
+                            center_h = h // 2
+                            x, y, w, h = center_x, center_y, center_w, center_h
+                            
+                            # Add a note that we're using fallback detection
+                            cv2.putText(frame, "Using fallback face region", (10, 30),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                            
+                            # Process the fallback region
+                            face = frame[y:y+h, x:x+w]
+                            input_tensor = preprocess_face(face).to(device)
+                            
+                            with torch.no_grad():
+                                output = model(input_tensor)
+                                probs = F.softmax(output, dim=1).cpu().numpy()[0]
+                                emotion_idx = np.argmax(probs)
+                                emotion_label = EMOTIONS[emotion_idx]
+                                emotion_history.append(emotion_label)
+                                
+                                # Update current emotion for real-time display
+                                current_emotion = emotion_label
+                                current_confidence = probs[emotion_idx] * 100
+                                current_probs = probs
+                            
+                            # Draw rectangle around fallback region
+                            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
+                        
+                        # Update real-time emotion display
+                        if current_probs is not None:
+                            # Display dominant emotion with large emoji
+                            dominant_emotion_html = create_dominant_emotion_display(current_emotion, current_confidence)
+                            emotion_display.markdown(dominant_emotion_html, unsafe_allow_html=True)
+                        else:
+                            # Show "detecting..." state when no face is found
+                            detecting_html = """
+                            <div style='text-align: center; padding: 15px; background-color: #fff3cd; 
+                                        border-radius: 10px; margin: 10px 0; border: 2px solid #ffc107;'>
+                                <div style='font-size: 2em; margin-bottom: 10px;'>🔍</div>
+                                <div style='font-size: 1.2em; font-weight: bold; color: #856404;'>
+                                    Detecting face...
+                                </div>
+                                <div style='font-size: 0.9em; color: #856404; margin-top: 5px;'>
+                                    Please position yourself in view
+                                </div>
+                            </div>
+                            """
+                            emotion_display.markdown(detecting_html, unsafe_allow_html=True)
                     
                     # Display the frame
-                    stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
+                    stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
                     frame_count += 1
                     
                     # Slow down capture rate
@@ -658,6 +735,22 @@ def emotion_recognition_page():
                     st.session_state['emotion_history'] = emotion_history
                     st.session_state['running'] = False
                     progress_placeholder.empty()
+                    
+                    # Clear real-time emotion display and show completion message
+                    completion_html = """
+                    <div style='text-align: center; padding: 15px; background-color: #d4edda; 
+                                border-radius: 10px; margin: 10px 0; border: 2px solid #28a745;'>
+                        <div style='font-size: 2em; margin-bottom: 10px;'>✅</div>
+                        <div style='font-size: 1.2em; font-weight: bold; color: #155724;'>
+                            Session Complete!
+                        </div>
+                        <div style='font-size: 0.9em; color: #155724; margin-top: 5px;'>
+                            Check results below
+                        </div>
+                    </div>
+                    """
+                    emotion_display.markdown(completion_html, unsafe_allow_html=True)
+                    
                     st.success("Session completed successfully!")
                     st.rerun()
         

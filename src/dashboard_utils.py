@@ -13,6 +13,64 @@ import pandas as pd
 EMOTIONS = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
 NEGATIVE_EMOTIONS = ['angry', 'disgust', 'fear', 'sad']
 
+# Emotion to emoji mapping
+EMOTION_EMOJIS = {
+    'angry': '😠',
+    'disgust': '🤢',
+    'fear': '😨',
+    'happy': '😊',
+    'neutral': '😐',
+    'sad': '😢',
+    'surprise': '😲'
+}
+
+# Emotion to color mapping for progress bars
+EMOTION_COLORS = {
+    'angry': '#FF5722',     # Red-orange
+    'disgust': '#795548',   # Brown
+    'fear': '#9C27B0',      # Purple
+    'happy': '#4CAF50',     # Green
+    'neutral': '#607D8B',   # Blue-grey
+    'sad': '#2196F3',       # Blue
+    'surprise': '#FF9800'   # Orange
+}
+
+def get_emotion_emoji(emotion):
+    """Get emoji for a given emotion"""
+    return EMOTION_EMOJIS.get(emotion, '❓')
+
+def get_emotion_color(emotion):
+    """Get color for a given emotion"""
+    return EMOTION_COLORS.get(emotion, '#9E9E9E')
+
+def create_dominant_emotion_display(emotion, confidence):
+    """Create HTML for dominant emotion display with large emoji"""
+    emoji = get_emotion_emoji(emotion)
+    color = get_emotion_color(emotion)
+    
+    html = f"""
+    <div style='text-align: center; padding: 15px; background-color: #f8f9fa; 
+                border-radius: 10px; margin: 10px 0; border: 2px solid {color};
+                transition: all 0.5s ease; animation: emotionGlow 3s infinite;'>
+        <div style='font-size: 3em; margin-bottom: 10px; animation: bounce 2s infinite;'>{emoji}</div>
+        <div style='font-size: 1.5em; font-weight: bold; color: {color}; 
+                   text-transform: capitalize; margin-bottom: 5px;'>{emotion}</div>
+        <div style='font-size: 1.2em; color: #666;'>{confidence:.1f}% confidence</div>
+    </div>
+    <style>
+    @keyframes emotionGlow {{
+        0%, 100% {{ box-shadow: 0 0 5px {color}30; }}
+        50% {{ box-shadow: 0 0 20px {color}60, 0 0 30px {color}30; }}
+    }}
+    @keyframes bounce {{
+        0%, 20%, 50%, 80%, 100% {{ transform: translateY(0); }}
+        40% {{ transform: translateY(-10px); }}
+        60% {{ transform: translateY(-5px); }}
+    }}
+    </style>
+    """
+    return html
+
 # Visualization utilities
 def generate_emotion_chart(emotion_history):
     """Generate a bar chart visualization of emotion distribution"""

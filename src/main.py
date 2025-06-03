@@ -97,7 +97,11 @@ def main():
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
 
-        for (x, y, w, h) in faces:
+        # Only process the largest face (most prominent one)
+        if len(faces) > 0:
+            # Find the largest face by area (width * height)
+            largest_face = max(faces, key=lambda face: face[2] * face[3])
+            x, y, w, h = largest_face
             face = frame[y:y+h, x:x+w]
             input_tensor = preprocess_face(face).to(device)
 
